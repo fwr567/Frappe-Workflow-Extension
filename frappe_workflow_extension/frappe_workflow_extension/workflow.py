@@ -1,0 +1,415 @@
+# Copyright (c) 2025, Kenya Red Cross Society
+# License: see license.txt
+
+import json
+from collections import defaultdict
+from typing import Union
+
+import frappe
+from frappe import _
+from frappe.model.docstatus import DocStatus
+from frappe.model.document import Document
+from frappe.utils import cint
+
+
+def get_workflow_name(doctype: str) -> str | None:
+    """Return active NL Workflow name for the given doctype."""
+    return frappe.db.get_value(
+        "NL Workflow", {"document_type": doctype, "is_active": 1}, "name"
+    )
+
+
+def get_workflow(doctype: str):
+    """Return cached NL Workflow document for the given doctype."""
+    workflow_name = get_workflow_name(doctype)
+    if not workflow_name:
+        frappe.throw(
+            _(f"No active NL Workflow found for {doctype}. Please configure one."),
+            title=_("Workflow Missing"),
+        )
+    return frappe.get_cached_doc("NL Workflow", workflow_name)
+
+
+@frappe.whitelist()
+def get_transitions(
+    doc: Union[Document, str, dict],
+    workflow: str = None,
+    raise_exception: bool = False,
+) -> list[dict]:
+    """Return transitions for the current user in NL Workflow."""
+
+    if not isinstance(doc, Document):
+        doc = frappe.get_doc(frappe.parse_json(doc))
+        if not doc.get("name"):
+            return []
+        doc.load_from_db()
+
+    if doc.is_new():
+        return []
+
+    user = frappe.session.user
+    doc.check_permission("read")
+
+    workflow_doc = (
+        frappe.get_doc("NL Workflow", workflow)
+        if workflow
+        else get_workflow(doc.doctype)
+    )
+    current_state = doc.get(workflow_doc.workflow_state_field)
+
+    if not current_state:
+        if raise_exception:
+            frappe.throw(_("Workflow State not set"))
+        return []
+
+    return get_allowed_transitions_for_user(workflow_doc.name, current_state, user)
+
+
+def get_allowed_transitions_for_user(
+    workflow, current_state: str, user: str = None
+) -> list[dict]:
+    """Return all transitions allowed for the user for current state."""
+    if not user:
+        user = frappe.session.user
+    transitions = frappe.get_all(
+        "NL Workflow Transition",
+        filters={"parent": workflow, "state": current_state},
+        fields=["name", "approver_type", "allowed", "next_state", "action"],
+        order_by="idx asc",
+    )
+
+    user_roles = frappe.get_roles(user)
+    allowed = []
+
+    for t in transitions:
+        if t.approver_type == "Role" and t.allowed in user_roles:
+            allowed.append(t)
+        elif t.approver_type == "User" and t.allowed == user:
+            allowed.append(t)
+
+    return allowed
+
+
+def has_approval_access(user, doc, transition):
+    """Determine if user can perform transition (no self-approval unless allowed)."""
+    return (
+        user == "Administrator"
+        or transition.get("allow_self_approval")
+        or user != doc.get("owner")
+    )
+
+
+@frappe.whitelist()
+def apply_workflow(doc, action):
+    """Execute a workflow transition action for NL Workflow."""
+    doc = frappe.get_doc(frappe.parse_json(doc))
+    doc.load_from_db()
+
+    workflow = get_workflow(doc.doctype)
+    transitions = get_transitions(doc, workflow.name)
+    user = frappe.session.user
+
+    transition = next((t for t in transitions if t.action == action), None)
+    if not transition:
+        frappe.throw(_("Invalid Workflow Action: {0}").format(action))
+
+    if not has_approval_access(user, doc, transition):
+        frappe.throw(_("Self-approval is not allowed for this action."))
+
+    doc.set(workflow.workflow_state_field, transition.next_state)
+
+    next_state = next(
+        (s for s in workflow.states if s.state == transition.next_state), None
+    )
+    if not next_state:
+        frappe.throw(
+            _("Next workflow state not defined: {0}").format(transition.next_state)
+        )
+
+    if next_state.update_field:
+        doc.set(next_state.update_field, next_state.update_value)
+
+    new_docstatus = DocStatus(next_state.doc_status or 0)
+    _update_docstatus(doc, new_docstatus)
+
+    doc.add_comment("Workflow", _(f"Moved to {next_state.state}"))
+    return doc
+
+
+def _update_docstatus(doc, new_docstatus):
+    """Handle docstatus transitions cleanly."""
+    if doc.docstatus.is_draft() and new_docstatus.is_draft():
+        doc.save()
+    elif doc.docstatus.is_draft() and new_docstatus.is_submitted():
+        doc.submit()
+    elif doc.docstatus.is_submitted() and new_docstatus.is_submitted():
+        doc.save()
+    elif doc.docstatus.is_submitted() and new_docstatus.is_cancelled():
+        doc.cancel()
+    else:
+        frappe.throw(_("Illegal Document Status transition"))
+
+
+@frappe.whitelist()
+def bulk_workflow_approval(docnames, doctype, action):
+    """Run bulk workflow approvals in background or sequentially."""
+    docnames = json.loads(docnames)
+    if len(docnames) < 20:
+        _bulk_workflow_action(docnames, doctype, action)
+    elif len(docnames) <= 500:
+        frappe.msgprint(
+            _(f"Bulk {action} enqueued for background processing."),
+            alert=True,
+        )
+        frappe.enqueue(
+            _bulk_workflow_action,
+            docnames=docnames,
+            doctype=doctype,
+            action=action,
+            queue="short",
+            timeout=1000,
+        )
+    else:
+        frappe.throw(_("Bulk approval limited to 500 documents."))
+
+
+def _bulk_workflow_action(docnames, doctype, action):
+    failed, success = defaultdict(list), defaultdict(list)
+    frappe.clear_messages()
+
+    for idx, name in enumerate(docnames, 1):
+        try:
+            show_progress(docnames, _("Applying: {0}").format(action), idx, name)
+            apply_workflow(frappe.get_doc(doctype, name), action)
+            frappe.db.commit()
+            success[name].append({"message": "Success"})
+        except Exception as e:
+            frappe.db.rollback()
+            failed[name].append({"message": str(e)})
+            frappe.log_error(
+                title=f"Workflow {action} failed for {doctype} {name}",
+                reference_doctype="NL Workflow",
+                reference_name=action,
+            )
+
+    _print_workflow_results(success, failed, doctype)
+
+
+def _print_workflow_results(success, failed, doctype):
+    """Display a summarized report after bulk workflow processing."""
+    if success:
+        _print_workflow_log(success, _("Successful Transactions"), doctype, "green")
+    if failed:
+        _print_workflow_log(failed, _("Failed Transactions"), doctype, "red")
+
+
+def _print_workflow_log(records, title, doctype, indicator):
+    if not records:
+        return
+    msg = f"<h4>{title}</h4>"
+    for doc, logs in records.items():
+        html = (
+            f"<details><summary>{frappe.utils.get_link_to_form(doctype, doc)}</summary>"
+        )
+        for l in logs:
+            html += f"<div class='small text-muted' style='padding:2.5px'>{l.get('message')}</div>"
+        html += "</details>"
+        msg += html
+    frappe.msgprint(
+        msg,
+        title=_("Workflow Status"),
+        indicator=indicator,
+        is_minimizable=True,
+        realtime=True,
+    )
+
+
+def show_progress(docnames, message, i, description):
+    n = len(docnames)
+    if n >= 5:
+        frappe.publish_progress(
+            float(i) * 100 / n, title=message, description=description
+        )
+
+
+@frappe.whitelist()
+def has_workflow(doctype: str):
+    """Return active NL Workflow name if it exists for the given doctype."""
+    return get_workflow_name(doctype)
+
+
+@frappe.whitelist()
+def get_common_transition_actions(docs, doctype):
+    """Find workflow actions common to all given documents."""
+    if isinstance(docs, str):
+        docs = json.loads(docs)
+
+    user = frappe.session.user
+    common_actions = None
+
+    for doc in docs:
+        if not doc.get("doctype"):
+            doc["doctype"] = doctype
+
+        transitions = get_transitions(doc)
+        actions = [
+            t.get("action") for t in transitions if has_approval_access(user, doc, t)
+        ]
+        if common_actions is None:
+            common_actions = set(actions)
+        else:
+            common_actions &= set(actions)
+        if not common_actions:
+            break
+
+    return list(common_actions or [])
+
+
+def get_workflow_safe_globals():
+    # access to frappe.db.get_value, frappe.db.get_list, and date time utils.
+    return dict(
+        frappe=frappe._dict(
+            db=frappe._dict(get_value=frappe.db.get_value, get_list=frappe.db.get_list),
+            session=frappe.session,
+            utils=frappe._dict(
+                now_datetime=frappe.utils.now_datetime,
+                add_to_date=frappe.utils.add_to_date,
+                get_datetime=frappe.utils.get_datetime,
+                now=frappe.utils.now,
+            ),
+        )
+    )
+
+
+def is_transition_condition_satisfied(transition, doc) -> bool:
+    if not transition.condition:
+        return True
+    else:
+        return frappe.safe_eval(
+            transition.condition, get_workflow_safe_globals(), dict(doc=doc.as_dict())
+        )
+
+
+@frappe.whitelist()
+def can_cancel_document(doctype):
+    workflow = get_workflow(doctype)
+    cancelling_states = [s.state for s in workflow.states if s.doc_status == "2"]
+    if not cancelling_states:
+        return True
+
+    for transition in workflow.transitions:
+        if transition.next_state in cancelling_states:
+            return False
+    return True
+
+
+def validate_workflow(doc):
+    """Validate Workflow State and Transition for the current user.
+
+    - Check if user is allowed to edit in current state
+    - Check if user is allowed to transition to the next state (if changed)
+    """
+    workflow = get_workflow(doc.doctype)
+
+    current_state = None
+    if getattr(doc, "_doc_before_save", None):
+        current_state = doc._doc_before_save.get(workflow.workflow_state_field)
+    next_state = doc.get(workflow.workflow_state_field)
+
+    if not next_state:
+        next_state = workflow.states[0].state
+        doc.set(workflow.workflow_state_field, next_state)
+
+    if not current_state:
+        current_state = workflow.states[0].state
+
+    state_row = [d for d in workflow.states if d.state == current_state]
+    if not state_row:
+        frappe.throw(
+            _(
+                "{0} is not a valid Workflow State. Please update your Workflow and try again."
+            ).format(frappe.bold(current_state))
+        )
+    state_row = state_row[0]
+
+    # if transitioning, check if user is allowed to transition
+    if current_state != next_state:
+        bold_current = frappe.bold(current_state)
+        bold_next = frappe.bold(next_state)
+
+        if not doc._doc_before_save:
+            # transitioning directly to a state other than the first
+            # e.g from data import
+            frappe.throw(
+                _("Workflow State transition not allowed from {0} to {1}").format(
+                    bold_current, bold_next
+                ),
+                WorkflowPermissionError,
+            )
+
+        transitions = get_transitions(doc._doc_before_save)
+        transition = [d for d in transitions if d.next_state == next_state]
+        if not transition:
+            frappe.throw(
+                _("Workflow State transition not allowed from {0} to {1}").format(
+                    bold_current, bold_next
+                ),
+                WorkflowPermissionError,
+            )
+
+
+def get_workflow_state_field(workflow_name):
+    return get_workflow_field_value(workflow_name, "workflow_state_field")
+
+
+def send_email_alert(workflow_name):
+    return get_workflow_field_value(workflow_name, "send_email_alert")
+
+
+def get_workflow_field_value(workflow_name, field):
+    return frappe.get_cached_value("NL Workflow", workflow_name, field)
+
+
+def print_workflow_log(messages, title, doctype, indicator):
+    if messages.keys():
+        msg = f"<h4>{title}</h4>"
+
+        for doc in messages.keys():
+            if len(messages[doc]):
+                html = f"<details><summary>{frappe.utils.get_link_to_form(doctype, doc)}</summary>"
+                for log in messages[doc]:
+                    if log.get("message"):
+                        html += "<div class='small text-muted' style='padding:2.5px'>{}</div>".format(
+                            log.get("message")
+                        )
+                html += "</details>"
+            else:
+                html = f"<div>{doc}</div>"
+            msg += html
+
+        frappe.msgprint(
+            msg,
+            title=_("Workflow Status"),
+            indicator=indicator,
+            is_minimizable=True,
+            realtime=True,
+        )
+
+
+def set_workflow_state_on_action(doc, workflow_name, action):
+    workflow = frappe.get_doc("NL Workflow", workflow_name)
+    workflow_state_field = workflow.workflow_state_field
+
+    # If workflow state of doc is already correct, don't set workflow state
+    for state in workflow.states:
+        if state.state == doc.get(workflow_state_field) and doc.docstatus == cint(
+            state.doc_status
+        ):
+            return
+
+    action_map = {"update_after_submit": "1", "submit": "1", "cancel": "2"}
+    docstatus = action_map[action]
+    for state in workflow.states:
+        if state.doc_status == docstatus:
+            doc.set(workflow_state_field, state.state)
+            return

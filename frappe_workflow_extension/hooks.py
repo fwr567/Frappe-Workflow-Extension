@@ -26,7 +26,7 @@ app_license = "agpl-3.0"
 
 # include js, css files in header of desk.html
 # app_include_css = "/assets/frappe_workflow_extension/css/frappe_workflow_extension.css"
-# app_include_js = "/assets/frappe_workflow_extension/js/frappe_workflow_extension.js"
+app_include_js = ["/assets/frappe_workflow_extension/js/nl_workflow.js"]
 
 # include js, css files in header of web template
 # web_include_css = "/assets/frappe_workflow_extension/css/frappe_workflow_extension.css"
@@ -137,13 +137,22 @@ app_license = "agpl-3.0"
 # ---------------
 # Hook on document methods and events
 
-# doc_events = {
-# 	"*": {
-# 		"on_update": "method",
-# 		"on_cancel": "method",
-# 		"on_trash": "method"
-# 	}
-# }
+doc_events = {
+    "*": {
+        "on_update": [
+            "frappe_workflow_extension.frappe_workflow_extension.doctype.nl_workflow_action.nl_workflow_action.process_workflow_actions",
+        ],
+        "on_cancel": [
+            "frappe_workflow_extension.frappe_workflow_extension.doctype.nl_workflow_action.nl_workflow_action.process_workflow_actions",
+        ],
+        "on_trash": [
+            "frappe_workflow_extension.frappe_workflow_extension.doctype.nl_workflow_action.nl_workflow_action.process_workflow_actions",
+        ],
+        "on_update_after_submit": [
+            "frappe_workflow_extension.frappe_workflow_extension.doctype.nl_workflow_action.nl_workflow_action.process_workflow_actions",
+        ],
+    },
+}
 
 # Scheduled Tasks
 # ---------------
@@ -241,4 +250,3 @@ app_license = "agpl-3.0"
 # default_log_clearing_doctypes = {
 # 	"Logging DocType Name": 30  # days to retain logs
 # }
-
