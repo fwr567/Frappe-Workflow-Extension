@@ -17,8 +17,8 @@ from frappe.utils.verified_command import get_signed_params, verify_request
 from ...workflow import (
     apply_workflow,
     get_allowed_transitions_for_user,
+    get_doc_workflow_state,
     get_workflow_name,
-    get_workflow_state_field,
     has_approval_access,
     is_transition_condition_satisfied,
     send_email_alert,
@@ -322,9 +322,7 @@ def get_allowed_roles(user, workflow, workflow_state):
 
 
 def get_next_possible_transitions(workflow_name, state, doc=None):
-    print(workflow_name, state, "workflow in get_next_possible_transitions", "\n\n\n")
     transitions = get_allowed_transitions_for_user(workflow_name, state)
-    print(transitions, "transitions in get_next_possible_transitions", "\n\n\n")
     transitions_to_return = []
 
     for transition in transitions:
@@ -484,12 +482,6 @@ def clear_workflow_actions(doctype, name):
             "reference_doctype": doctype,
         },
     )
-
-
-def get_doc_workflow_state(doc):
-    workflow_name = get_workflow_name(doc.get("doctype"), doc.get("name"))
-    workflow_state_field = get_workflow_state_field(workflow_name)
-    return doc.get(workflow_state_field)
 
 
 def get_common_email_args(doc):
