@@ -12,6 +12,12 @@ from frappe.model.document import Document
 from frappe.utils import cint
 
 
+def get_doc_workflow_state(doc):
+    workflow_name = get_workflow_name(doc.get("doctype"), doc.get("name"))
+    workflow_state_field = get_workflow_state_field(workflow_name)
+    return doc.get(workflow_state_field)
+
+
 def get_workflow_name(doctype: str, docname: str = None) -> str | None:
     company = project = user = None
 
@@ -46,6 +52,7 @@ def get_workflow_name(doctype: str, docname: str = None) -> str | None:
     return None
 
 
+@frappe.whitelist()
 def get_workflow(doctype: str, docname: str = None):
     """Return cached NL Workflow document for the given doctype."""
     workflow_name = get_workflow_name(doctype, docname)
@@ -260,9 +267,39 @@ def show_progress(docnames, message, i, description):
 
 
 @frappe.whitelist()
-def has_workflow(doctype: str, docname: str = None) -> str | None:
-    """Return active NL Workflow name if it exists for the given doctype."""
-    return get_workflow_name(doctype, docname)
+def get_workflow_info(doc: dict | str):
+    if isinstance(doc, str):
+        doc = json.loads(doc)
+
+    workflow_name = get_workflow_name(doc.get("doctype"), doc.get("name"))
+    if not workflow_name:
+        return None
+
+    workflow = frappe.get_cached_doc("NL Workflow", workflow_name)
+    allow_edit = False
+    user = frappe.session.user
+    user_roles = frappe.get_roles(user)
+
+    workflow_state = get_doc_workflow_state(doc)
+
+    state = next((s for s in workflow.states if s.state == workflow_state), None)
+
+    if state:
+        if state.edit_permission_type == "User":
+            if state.allow_edit == user:
+                allow_edit = True
+        elif state.edit_permission_type == "Role":
+            allowed_role = state.allow_edit
+            if allowed_role:
+                if isinstance(allowed_role, str):
+                    allowed_role = allowed_role.strip()
+                if allowed_role in user_roles:
+                    allow_edit = True
+
+    result = {"workflow": workflow.as_dict()}
+    if allow_edit:
+        result["allow_edit"] = allow_edit
+    return result
 
 
 @frappe.whitelist()

@@ -4,15 +4,22 @@ $(document).on("form-refresh", function (event, frm) {
 
 	try {
 		frappe.call({
-			method: "frappe_workflow_extension.frappe_workflow_extension.workflow.has_workflow",
-			args: { doctype: frm.doctype, docname: frm.doc.name },
+			method: "frappe_workflow_extension.frappe_workflow_extension.workflow.get_workflow_info",
+			args: { doc: frm.doc },
 			callback: function (res) {
-				const workflow_name = res.message;
+				const workflow = res.message.workflow;
+				const workflow_name = res.message.workflow.name;
+				if (!workflow) return;
+
+				if (!res.message.allow_edit) {
+					frm.set_read_only(true);
+				}
 
 				const has_workflow = !!workflow_name;
 				if (has_workflow) {
 					frm.page.clear_primary_action();
-					override_document_status(frm);
+					if (!workflow.override_status)
+						override_document_status(frm, workflow.workflow_state_field);
 				}
 
 				if (workflow_name) {
@@ -31,6 +38,7 @@ function load_allowed_transitions(frm, workflow_name) {
 		args: { doc: frm.doc, workflow: workflow_name },
 		callback: function (r) {
 			const transitions = r.message || [];
+
 			frm.page.clear_actions_menu();
 
 			if (!transitions.length) return;
@@ -107,26 +115,107 @@ function add_workflow_help_action(frm, transitions) {
 	}
 }
 
-function override_document_status(frm) {
+function override_document_status(frm, workflow_state_field) {
 	try {
-		const state_field = frappe.workflow.get_state_fieldname(frm.doctype);
-		const current_state = frm.doc[state_field];
-		let status_label = "";
-		let color = "gray";
-		if (frm.doc.docstatus === 0) {
-			status_label = __("Draft");
-			color = "gray";
-		} else if (frm.doc.docstatus === 1) {
-			status_label = current_state ? __(current_state) : __("Submitted");
-			color = "blue";
-		} else if (frm.doc.docstatus === 2) {
-			status_label = __("Cancelled");
-			color = "red";
-		}
-		if (frm.page && frm.page.set_indicator) {
-			frm.page.set_indicator(status_label, color);
+		const doc = frm.doc;
+		const doctype = frm.doctype;
+		if (!doc || !doctype) return;
+
+		let label = __("Unknown");
+		let filter = null;
+
+		const meta = frappe.get_meta(doctype);
+		const is_submittable = meta?.is_submittable;
+
+		if (doc.__unsaved) {
+			label = __("Not Saved");
+			const color = "orange";
+			if (frm.page && typeof frm.page.set_indicator === "function") {
+				frm.page.set_indicator(label, color);
+			}
+		} else if (workflow_state_field && doc[workflow_state_field]) {
+			const value = doc[workflow_state_field];
+			label = __(value);
+			filter = `${workflow_state_field},=,${value}`;
+
+			frappe.call({
+				method: "frappe.client.get_value",
+				args: {
+					doctype: "Workflow State",
+					fieldname: "style",
+					filters: { name: value },
+				},
+				callback: function (r) {
+					let color = "gray";
+					if (r.message && r.message.style) {
+						const style = r.message.style;
+						color =
+							{
+								Success: "green",
+								Warning: "orange",
+								Danger: "red",
+								Primary: "blue",
+								Inverse: "black",
+								Info: "light-blue",
+							}[style] || "gray";
+					}
+					if (frm.page && typeof frm.page.set_indicator === "function") {
+						frm.page.set_indicator(label, color, filter);
+					}
+				},
+			});
+		} else if (is_submittable && doc.docstatus === 0) {
+			label = __("Draft");
+			const color = "red";
+			filter = "docstatus,=,0";
+			if (frm.page && typeof frm.page.set_indicator === "function") {
+				frm.page.set_indicator(label, color, filter);
+			}
+		} else if (is_submittable && doc.docstatus === 1) {
+			label = __("Submitted");
+			const color = "blue";
+			filter = "docstatus,=,1";
+			if (frm.page && typeof frm.page.set_indicator === "function") {
+				frm.page.set_indicator(label, color, filter);
+			}
+		} else if (is_submittable && doc.docstatus === 2) {
+			label = __("Cancelled");
+			const color = "red";
+			filter = "docstatus,=,2";
+			if (frm.page && typeof frm.page.set_indicator === "function") {
+				frm.page.set_indicator(label, color, filter);
+			}
+		} else if (doc.status && meta?.states?.find((d) => d.title === doc.status)) {
+			const state = meta.states.find((d) => d.title === doc.status);
+			label = __(doc.status);
+			const color = frappe.scrub(state.color, "-");
+			filter = `status,=,${doc.status}`;
+			if (frm.page && typeof frm.page.set_indicator === "function") {
+				frm.page.set_indicator(label, color, filter);
+			}
+		} else if (doc.status) {
+			label = __(doc.status);
+			const color = frappe.utils.guess_colour(doc.status);
+			filter = `status,=,${doc.status}`;
+			if (frm.page && typeof frm.page.set_indicator === "function") {
+				frm.page.set_indicator(label, color, filter);
+			}
+		} else if (frappe.meta.has_field(doctype, "enabled")) {
+			label = doc.enabled ? __("Enabled") : __("Disabled");
+			const color = doc.enabled ? "blue" : "gray";
+			filter = `enabled,=,${doc.enabled ? 1 : 0}`;
+			if (frm.page && typeof frm.page.set_indicator === "function") {
+				frm.page.set_indicator(label, color, filter);
+			}
+		} else if (frappe.meta.has_field(doctype, "disabled")) {
+			label = doc.disabled ? __("Disabled") : __("Enabled");
+			const color = doc.disabled ? "gray" : "blue";
+			filter = `disabled,=,${doc.disabled ? 1 : 0}`;
+			if (frm.page && typeof frm.page.set_indicator === "function") {
+				frm.page.set_indicator(label, color, filter);
+			}
 		}
 	} catch (error) {
-		console.warn(" Failed to override document status:", error);
+		console.warn("Failed to override document status:", error);
 	}
 }
