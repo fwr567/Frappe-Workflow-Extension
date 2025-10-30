@@ -16,8 +16,11 @@
   "send_email_alert",
   "column_break_aymh",
   "company",
-  "project",
   "user",
+  "accounting_dimensions_section",
+  "cost_center",
+  "dimension_col_break",
+  "project",
   "states_head",
   "states",
   "transition_rules",
@@ -127,11 +130,27 @@
    "fieldtype": "Link",
    "label": "User",
    "options": "User"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "accounting_dimensions_section",
+   "fieldtype": "Section Break",
+   "label": "Accounting Dimensions"
+  },
+  {
+   "fieldname": "cost_center",
+   "fieldtype": "Link",
+   "label": "Cost Center",
+   "options": "Cost Center"
+  },
+  {
+   "fieldname": "dimension_col_break",
+   "fieldtype": "Column Break"
   }
  ],
  "icon": "fa fa-random",
  "links": [],
- "modified": "2025-10-30 11:28:23.060623",
+ "modified": "2025-10-30 18:37:45.665099",
  "modified_by": "Administrator",
  "module": "Frappe Workflow Extension",
  "name": "NL Workflow",

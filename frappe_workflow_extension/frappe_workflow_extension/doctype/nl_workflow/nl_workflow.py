@@ -29,7 +29,6 @@ class NLWorkflow(Document):
         project: DF.Link | None
 
     def validate(self):
-        # self.set_active()
         self.validate_docstatus()
         self.validate_unique_active_combination()
 
@@ -132,54 +131,106 @@ class NLWorkflow(Document):
 
     def validate_unique_active_combination(self):
         """Ensure only one active workflow exists per unique combination of
-        document_type, company, project, and user."""
+        document_type, company, user, and all accounting dimensions."""
         if not self.document_type:
             frappe.throw(_("Document Type is required for workflow validation."))
 
         if not self.is_active:
             return
 
+        accounting_dimensions = (
+            frappe.get_all(
+                "Accounting Dimension", filters={"disabled": 0}, pluck="fieldname"
+            )
+            or []
+        )
+
         filters = {
             "document_type": self.document_type,
             "is_active": 1,
             "name": ["!=", self.name],
+            "company": self.company or ["in", [None, ""]],
+            "user": self.user or ["in", [None, ""]],
+            "project": self.project or ["in", [None, ""]],
+            "cost_center": self.cost_center or ["in", [None, ""]],
         }
 
-        if self.company:
-            filters["company"] = self.company
-        if self.project:
-            filters["project"] = self.project
-        if self.user:
-            filters["user"] = self.user
+        for dimension in accounting_dimensions:
+            if hasattr(self, dimension) and getattr(self, dimension):
+                filters[dimension] = getattr(self, dimension)
+            else:
+                filters[dimension] = ["in", [None, ""]]
 
-        existing = frappe.get_all(
+        existing_workflows = frappe.get_all(
             "NL Workflow",
             filters=filters,
-            fields=["name", "company", "project", "user"],
+            fields=["name", "document_type"] + accounting_dimensions,
         )
 
-        if existing:
-            existing_doc = existing[0]
+        print(existing_workflows, "<<< existing_workflows\n\n\n\n", filters)
 
-            reason_parts = []
-            if existing_doc.company:
-                reason_parts.append(_("Company '{0}'").format(existing_doc.company))
-            if existing_doc.project:
-                reason_parts.append(_("Project '{0}'").format(existing_doc.project))
-            if existing_doc.user:
-                reason_parts.append(_("User '{0}'").format(existing_doc.user))
+        if existing_workflows:
+            existing_doc = existing_workflows[0]
 
-            if not reason_parts:
-                reason_text = _("This is a global workflow for the same Document Type.")
-            else:
-                reason_text = _("It matches the same ") + ", ".join(reason_parts)
-
-            frappe.throw(
-                _(
-                    "Duplicate Active Workflow Detected: The workflow '{0}' is already active for Document Type '{1}'. {2} "
-                    "Only one active workflow is allowed per unique combination of Document Type, Company, Project, and User."
-                ).format(existing_doc.name, self.document_type, reason_text)
+            matching_criteria = []
+            matching_criteria.append(
+                _("Document Type: <strong>{0}</strong>").format(self.document_type)
             )
+
+            for dimension in accounting_dimensions:
+                current_value = getattr(self, dimension, None)
+                existing_value = existing_doc.get(dimension)
+
+                if current_value and existing_value and current_value == existing_value:
+                    dimension_label = (
+                        frappe.get_meta("NL Workflow").get_field(dimension).label
+                    )
+                    matching_criteria.append(
+                        _("{0}: <strong>{1}</strong>").format(
+                            dimension_label, current_value
+                        )
+                    )
+
+            error_message = """
+                <div style="font-family: sans-serif;">
+                    <h4 style="color: #e74c3c; margin-bottom: 15px;">🚫 Duplicate Active Workflow Detected</h4>
+                    
+                    <div style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 15px;">
+                        <p style="margin: 0 0 10px 0;"><strong>Matching Criteria:</strong></p>
+                        <ul style="margin: 0; padding-left: 20px;">
+                            {criteria_items}
+                        </ul>
+                    </div>
+                    
+                    <p style="margin-bottom: 15px;">
+                        The workflow 
+                        <a href="/app/nl-workflow/{existing_name}" target="_blank" style="color: #2490ef; text-decoration: none;">
+                            <strong>{existing_name}</strong>
+                        </a> 
+                        is already active with the same combination.
+                    </p>
+                    
+                    <div style="background: #fff3cd; padding: 12px; border-radius: 5px; border-left: 4px solid #ffc107;">
+                        <strong>💡 Resolution Required:</strong><br>
+                        Only one active workflow is allowed per unique combination of Document Type and Accounting Dimensions. 
+                        You must either:
+                        <ul style="margin: 10px 0;">
+                            <li>Deactivate the existing workflow  <a href="/app/nl-workflow/{existing_name}" target="_blank" style="color: #2490ef; text-decoration: none;">
+                            <strong>{existing_name}</strong>
+                        </a> </li>
+                            <li>Modify the accounting dimensions of this workflow to make it unique</li>
+                            <li>Deactivate this workflow and use the existing one</li>
+                        </ul>
+                    </div>
+                </div>
+            """.format(
+                criteria_items="".join(
+                    [f"<li>{item}</li>" for item in matching_criteria if item]
+                ),
+                existing_name=existing_doc.name,
+            )
+
+            frappe.throw(_(error_message), title=_("Duplicate Workflow Configuration"))
 
 
 @frappe.whitelist()
