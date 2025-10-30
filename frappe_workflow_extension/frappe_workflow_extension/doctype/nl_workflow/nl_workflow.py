@@ -1,7 +1,3 @@
-# Copyright (c) 2025, Kenya Red Cross Society and contributors
-# For license information, please see license.txt
-
-
 import frappe
 from frappe import _
 from frappe.model.document import Document
@@ -28,10 +24,14 @@ class NLWorkflow(Document):
         workflow_data: DF.JSON | None
         workflow_name: DF.Data
         workflow_state_field: DF.Data
+        user: DF.Link | None
+        company: DF.Link | None
+        project: DF.Link | None
 
     def validate(self):
-        self.set_active()
+        # self.set_active()
         self.validate_docstatus()
+        self.validate_unique_active_combination()
 
     def on_update(self):
         self.create_custom_field_for_workflow_state()
@@ -40,12 +40,12 @@ class NLWorkflow(Document):
     def create_custom_field_for_workflow_state(self):
         frappe.clear_cache(doctype=self.document_type)
         meta = frappe.get_meta(self.document_type)
+
         if not meta.get_field(self.workflow_state_field):
-            frappe.get_doc(
+            custom_field = frappe.get_doc(
                 {
                     "doctype": "Custom Field",
                     "dt": self.document_type,
-                    "__islocal": 1,
                     "fieldname": self.workflow_state_field,
                     "label": self.workflow_state_field.replace("_", " ").title(),
                     "hidden": 1,
@@ -55,8 +55,8 @@ class NLWorkflow(Document):
                     "options": "Workflow State",
                     "owner": "Administrator",
                 }
-            ).save()
-
+            )
+            custom_field.insert(ignore_permissions=True)
             frappe.msgprint(
                 _("Created Custom Field {0} in {1}").format(
                     self.workflow_state_field, self.document_type
@@ -64,29 +64,31 @@ class NLWorkflow(Document):
             )
 
     def update_default_workflow_status(self):
-        docstatus_map = {}
-        states = self.get("states")
-        for d in states:
-            if d.doc_status not in docstatus_map:
-                frappe.db.sql(
-                    f"""
-					UPDATE `tab{self.document_type}`
-					SET `{self.workflow_state_field}` = %s
-					WHERE ifnull(`{self.workflow_state_field}`, '') = ''
-					AND `docstatus` = %s
-				""",
-                    (d.state, d.doc_status),
-                )
+        states = self.get("states") or []
+        if not states:
+            return
 
-                docstatus_map[d.doc_status] = d.state
+        for d in states:
+            docs_to_update = frappe.get_all(
+                self.document_type,
+                filters={
+                    self.workflow_state_field: ["in", ["", None]],
+                    "docstatus": d.doc_status,
+                },
+                pluck="name",
+            )
+
+            for name in docs_to_update:
+                frappe.db.set_value(
+                    self.document_type, name, self.workflow_state_field, d.state
+                )
 
     def validate_docstatus(self):
         def get_state(state):
             for s in self.states:
                 if s.state == state:
                     return s
-
-            frappe.throw(frappe._("{0} not a valid State").format(state))
+            frappe.throw(_("{0} is not a valid State").format(state))
 
         for t in self.transitions:
             state = get_state(t.state)
@@ -94,31 +96,89 @@ class NLWorkflow(Document):
 
             if state.doc_status == "2":
                 frappe.throw(
-                    frappe._(
-                        "Cannot change state of Cancelled Document. Transition row {0}"
+                    _(
+                        "Cannot change state of Cancelled Document (Transition row {0})"
                     ).format(t.idx)
                 )
 
             if state.doc_status == "1" and next_state.doc_status == "0":
                 frappe.throw(
-                    frappe._(
-                        "Submitted Document cannot be converted back to draft. Transition row {0}"
+                    _(
+                        "Submitted Document cannot revert to Draft (Transition row {0})"
                     ).format(t.idx)
                 )
 
             if state.doc_status == "0" and next_state.doc_status == "2":
                 frappe.throw(
-                    frappe._(
-                        "Cannot cancel before submitting. See Transition {0}"
-                    ).format(t.idx)
+                    _("Cannot cancel before submitting (Transition row {0})").format(
+                        t.idx
+                    )
                 )
 
     def set_active(self):
+        """Deactivate other workflows for the same document type if this one is active."""
         if int(self.is_active or 0):
-            frappe.db.sql(
-                """UPDATE `tabWorkflow` SET `is_active`=0
-				WHERE `document_type`=%s""",
-                self.document_type,
+            other_workflows = frappe.get_all(
+                "NL Workflow",
+                filters={
+                    "document_type": self.document_type,
+                    "is_active": 1,
+                    "name": ["!=", self.name],
+                },
+                pluck="name",
+            )
+            for wf in other_workflows:
+                frappe.db.set_value("NL Workflow", wf, "is_active", 0)
+
+    def validate_unique_active_combination(self):
+        """Ensure only one active workflow exists per unique combination of
+        document_type, company, project, and user."""
+        if not self.document_type:
+            frappe.throw(_("Document Type is required for workflow validation."))
+
+        if not self.is_active:
+            return
+
+        filters = {
+            "document_type": self.document_type,
+            "is_active": 1,
+            "name": ["!=", self.name],
+        }
+
+        if self.company:
+            filters["company"] = self.company
+        if self.project:
+            filters["project"] = self.project
+        if self.user:
+            filters["user"] = self.user
+
+        existing = frappe.get_all(
+            "NL Workflow",
+            filters=filters,
+            fields=["name", "company", "project", "user"],
+        )
+
+        if existing:
+            existing_doc = existing[0]
+
+            reason_parts = []
+            if existing_doc.company:
+                reason_parts.append(_("Company '{0}'").format(existing_doc.company))
+            if existing_doc.project:
+                reason_parts.append(_("Project '{0}'").format(existing_doc.project))
+            if existing_doc.user:
+                reason_parts.append(_("User '{0}'").format(existing_doc.user))
+
+            if not reason_parts:
+                reason_text = _("This is a global workflow for the same Document Type.")
+            else:
+                reason_text = _("It matches the same ") + ", ".join(reason_parts)
+
+            frappe.throw(
+                _(
+                    "Duplicate Active Workflow Detected: The workflow '{0}' is already active for Document Type '{1}'. {2} "
+                    "Only one active workflow is allowed per unique combination of Document Type, Company, Project, and User."
+                ).format(existing_doc.name, self.document_type, reason_text)
             )
 
 
@@ -128,10 +188,14 @@ def get_workflow_state_count(doctype, workflow_state_field, states):
     states = frappe.parse_json(states)
 
     if workflow_state_field in frappe.get_meta(doctype).get_valid_columns():
-        result = frappe.get_all(
-            doctype,
-            fields=[workflow_state_field, "count(*) as count"],
-            filters={workflow_state_field: ["not in", states]},
-            group_by=workflow_state_field,
-        )
-        return [r for r in result if r[workflow_state_field]]
+        result = (
+            frappe.qb.from_(frappe.qb.DocType(doctype))
+            .select(
+                frappe.qb.Field(workflow_state_field),
+                frappe.qb.functions.Count("*").as_("count"),
+            )
+            .where(frappe.qb.Field(workflow_state_field).notin(states))
+            .groupby(frappe.qb.Field(workflow_state_field))
+        ).run(as_dict=True)
+
+        return [r for r in result if r.get(workflow_state_field)]
