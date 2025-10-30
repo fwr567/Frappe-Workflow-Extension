@@ -12,16 +12,43 @@ from frappe.model.document import Document
 from frappe.utils import cint
 
 
-def get_workflow_name(doctype: str) -> str | None:
-    """Return active NL Workflow name for the given doctype."""
-    return frappe.db.get_value(
-        "NL Workflow", {"document_type": doctype, "is_active": 1}, "name"
-    )
+def get_workflow_name(doctype: str, docname: str = None) -> str | None:
+    company = project = user = None
+
+    if docname:
+        doc = frappe.get_doc(doctype, docname)
+        company = getattr(doc, "company", None)
+        project = getattr(doc, "project", None)
+        user = getattr(doc, "owner", None) or frappe.session.user
+
+    combinations = [
+        {"company": company, "project": project, "user": user},
+        {"company": company, "project": project},
+        {"company": company, "user": user},
+        {"project": project, "user": user},
+        {"company": company},
+        {"project": project},
+        {"user": user},
+        {},
+    ]
+
+    for combo in combinations:
+        filters = {
+            "document_type": doctype,
+            "is_active": 1,
+        }
+        filters.update({k: v for k, v in combo.items() if v})
+
+        workflow_name = frappe.db.get_value("NL Workflow", filters, "name")
+        if workflow_name:
+            return workflow_name
+
+    return None
 
 
-def get_workflow(doctype: str):
+def get_workflow(doctype: str, docname: str = None):
     """Return cached NL Workflow document for the given doctype."""
-    workflow_name = get_workflow_name(doctype)
+    workflow_name = get_workflow_name(doctype, docname)
     if not workflow_name:
         frappe.throw(
             _(f"No active NL Workflow found for {doctype}. Please configure one."),
@@ -53,7 +80,7 @@ def get_transitions(
     workflow_doc = (
         frappe.get_doc("NL Workflow", workflow)
         if workflow
-        else get_workflow(doc.doctype)
+        else get_workflow(doc.doctype, doc.name)
     )
     current_state = doc.get(workflow_doc.workflow_state_field)
 
@@ -105,7 +132,7 @@ def apply_workflow(doc, action):
     doc = frappe.get_doc(frappe.parse_json(doc))
     doc.load_from_db()
 
-    workflow = get_workflow(doc.doctype)
+    workflow = get_workflow(doc.doctype, doc.name)
     transitions = get_transitions(doc, workflow.name)
     user = frappe.session.user
 
@@ -233,9 +260,9 @@ def show_progress(docnames, message, i, description):
 
 
 @frappe.whitelist()
-def has_workflow(doctype: str):
+def has_workflow(doctype: str, docname: str = None) -> str | None:
     """Return active NL Workflow name if it exists for the given doctype."""
-    return get_workflow_name(doctype)
+    return get_workflow_name(doctype, docname)
 
 
 @frappe.whitelist()
@@ -291,8 +318,8 @@ def is_transition_condition_satisfied(transition, doc) -> bool:
 
 
 @frappe.whitelist()
-def can_cancel_document(doctype):
-    workflow = get_workflow(doctype)
+def can_cancel_document(doctype, docname=None):
+    workflow = get_workflow(doctype, docname)
     cancelling_states = [s.state for s in workflow.states if s.doc_status == "2"]
     if not cancelling_states:
         return True
@@ -309,7 +336,7 @@ def validate_workflow(doc):
     - Check if user is allowed to edit in current state
     - Check if user is allowed to transition to the next state (if changed)
     """
-    workflow = get_workflow(doc.doctype)
+    workflow = get_workflow(doc.doctype, doc.name)
 
     current_state = None
     if getattr(doc, "_doc_before_save", None):

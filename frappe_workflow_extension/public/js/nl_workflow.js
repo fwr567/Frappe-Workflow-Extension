@@ -5,7 +5,7 @@ $(document).on("form-refresh", function (event, frm) {
 	try {
 		frappe.call({
 			method: "frappe_workflow_extension.frappe_workflow_extension.workflow.has_workflow",
-			args: { doctype: frm.doctype },
+			args: { doctype: frm.doctype, docname: frm.doc.name },
 			callback: function (res) {
 				const workflow_name = res.message;
 
