@@ -9,21 +9,28 @@ $(document).on("form-refresh", function (event, frm) {
 			callback: function (res) {
 				const workflow = res.message.workflow;
 				const workflow_name = res.message.workflow.name;
-				if (!workflow) return;
+				const current_state = res.message.current_state;
+				if (!workflow && !current_state) return;
 
 				if (!res.message.allow_edit) {
 					frm.set_read_only(true);
 				}
 
 				const has_workflow = !!workflow_name;
+
 				if (has_workflow) {
 					frm.page.clear_primary_action();
+
 					if (!workflow.override_status)
-						override_document_status(frm, workflow.workflow_state_field);
+						override_document_status(
+							frm,
+							current_state,
+							workflow.workflow_state_field
+						);
 				}
 
-				if (workflow_name) {
-					load_allowed_transitions(frm, workflow_name);
+				if (workflow.name) {
+					load_allowed_transitions(frm, workflow, current_state);
 				}
 			},
 		});
@@ -32,10 +39,10 @@ $(document).on("form-refresh", function (event, frm) {
 	}
 });
 
-function load_allowed_transitions(frm, workflow_name) {
+function load_allowed_transitions(frm, workflow, current_state) {
 	frappe.call({
 		method: "frappe_workflow_extension.frappe_workflow_extension.workflow.get_transitions",
-		args: { doc: frm.doc, workflow: workflow_name },
+		args: { doc: frm.doc, workflow: workflow.name, current_state: current_state },
 		callback: function (r) {
 			const transitions = r.message || [];
 
@@ -115,7 +122,7 @@ function add_workflow_help_action(frm, transitions) {
 	}
 }
 
-function override_document_status(frm, workflow_state_field) {
+function override_document_status(frm, current_state, workflow_state_field) {
 	try {
 		const doc = frm.doc;
 		const doctype = frm.doctype;
@@ -133,8 +140,8 @@ function override_document_status(frm, workflow_state_field) {
 			if (frm.page && typeof frm.page.set_indicator === "function") {
 				frm.page.set_indicator(label, color);
 			}
-		} else if (workflow_state_field && doc[workflow_state_field]) {
-			const value = doc[workflow_state_field];
+		} else if (current_state) {
+			const value = current_state;
 			label = __(value);
 			filter = `${workflow_state_field},=,${value}`;
 
@@ -159,6 +166,7 @@ function override_document_status(frm, workflow_state_field) {
 								Info: "light-blue",
 							}[style] || "gray";
 					}
+
 					if (frm.page && typeof frm.page.set_indicator === "function") {
 						frm.page.set_indicator(label, color, filter);
 					}

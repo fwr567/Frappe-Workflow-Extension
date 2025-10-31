@@ -18,36 +18,117 @@ def get_doc_workflow_state(doc):
     return doc.get(workflow_state_field)
 
 
+def get_closest_company_with_workflow(
+    company: str, workflows: list[dict]
+) -> str | None:
+    """
+    Returns the company (current or closest parent with allow_descendants)
+    that has an active workflow defined.
+    Stops at the first eligible parent found.
+    """
+    if any(wf.company == company for wf in workflows):
+        return company
+
+    current = company
+    while True:
+        parent = frappe.db.get_value("Company", current, "parent_company")
+        if not parent:
+            break
+
+        parent_workflow_exists = any(
+            wf.company == parent and wf.allow_descendants for wf in workflows
+        )
+        if parent_workflow_exists:
+            return parent
+
+        current = parent
+
+    return None
+
+
+@frappe.whitelist()
 def get_workflow_name(doctype: str, docname: str = None) -> str | None:
-    company = project = user = None
+    """
+    Determine the most specific active workflow for a document based on:
+    Priority:
+    1️⃣ Closest company in tree (company or closest parent with allow_descendants)
+    2️⃣ User
+    3️⃣ Accounting Dimensions
+    4️⃣ Cost Center
+    5️⃣ Project
+    """
 
-    if docname:
-        doc = frappe.get_doc(doctype, docname)
-        company = getattr(doc, "company", None)
-        project = getattr(doc, "project", None)
-        user = getattr(doc, "owner", None) or frappe.session.user
+    doc = frappe.get_doc(doctype, docname) if docname else None
 
-    combinations = [
-        {"company": company, "project": project, "user": user},
-        {"company": company, "project": project},
-        {"company": company, "user": user},
-        {"project": project, "user": user},
-        {"company": company},
-        {"project": project},
-        {"user": user},
-        {},
+    company = getattr(doc, "company", None) or frappe.defaults.get_user_default(
+        "Company"
+    )
+    project = getattr(doc, "project", None)
+    cost_center = getattr(doc, "cost_center", None)
+    user = getattr(doc, "owner", None) or frappe.session.user
+
+    if not company:
+        return None
+
+    workflows = frappe.get_all(
+        "NL Workflow",
+        filters={"document_type": doctype, "is_active": 1},
+        fields=[
+            "name",
+            "company",
+            "project",
+            "cost_center",
+            "allow_descendants",
+            "user",
+        ],
+    )
+
+    closest_company = get_closest_company_with_workflow(company, workflows)
+    if not closest_company:
+        return None
+
+    valid_workflows = [wf for wf in workflows if wf.company == closest_company] + [
+        wf for wf in workflows if wf.allow_descendants and wf.company == closest_company
     ]
 
-    for combo in combinations:
-        filters = {
-            "document_type": doctype,
-            "is_active": 1,
-        }
-        filters.update({k: v for k, v in combo.items() if v})
+    accounting_dimensions = frappe.get_all(
+        "Accounting Dimension", filters={"disabled": 0}, pluck="fieldname"
+    )
 
-        workflow_name = frappe.db.get_value("NL Workflow", filters, "name")
-        if workflow_name:
-            return workflow_name
+    def matches_user(wf):
+        return wf.user and wf.user == user
+
+    def matches_accounting_dimensions(wf):
+        if not accounting_dimensions or not doc:
+            return False
+        for dim in accounting_dimensions:
+            doc_val = getattr(doc, dim, None)
+            wf_val = getattr(wf, dim, None)
+            if wf_val and doc_val and wf_val == doc_val:
+                return True
+        return False
+
+    def matches_cost_center(wf):
+        return wf.cost_center and wf.cost_center == cost_center
+
+    def matches_project(wf):
+        return wf.project and wf.project == project
+
+    def matches_company(wf):
+        return wf.company == closest_company
+
+    priority_checks = [
+        matches_user,
+        matches_accounting_dimensions,
+        matches_cost_center,
+        matches_project,
+        matches_company,
+    ]
+
+    for check in priority_checks:
+        for wf in valid_workflows:
+            if check(wf):
+                return wf.name
 
     return None
 
@@ -68,6 +149,7 @@ def get_workflow(doctype: str, docname: str = None):
 def get_transitions(
     doc: Union[Document, str, dict],
     workflow: str = None,
+    current_state: str = None,
     raise_exception: bool = False,
 ) -> list[dict]:
     """Return transitions for the current user in NL Workflow."""
@@ -89,13 +171,28 @@ def get_transitions(
         if workflow
         else get_workflow(doc.doctype, doc.name)
     )
-    current_state = doc.get(workflow_doc.workflow_state_field)
+    current_state = current_state or doc.get(workflow_doc.workflow_state_field)
+
+    if not current_state:
+        current_state = workflow_doc.transitions[0].state
+
+    state = next((s for s in workflow_doc.states if s.state == current_state), None)
+
+    if state and (cint(state.doc_status) != cint(doc.get("docstatus"))):
+        frappe.throw(
+            _(
+                "Workflow state '{0}' is not compatible with document status ({1}). "
+                "Please verify the NL Workflow configuration and ensure the document's "
+                "workflow state matches its docstatus."
+            ).format(state.state, doc.get("docstatus")),
+            title=_("Invalid Workflow State"),
+        )
+        return []
 
     if not current_state:
         if raise_exception:
             frappe.throw(_("Workflow State not set"))
         return []
-
     return get_allowed_transitions_for_user(workflow_doc.name, current_state, user)
 
 
@@ -144,6 +241,7 @@ def apply_workflow(doc, action):
     user = frappe.session.user
 
     transition = next((t for t in transitions if t.action == action), None)
+
     if not transition:
         frappe.throw(_("Invalid Workflow Action: {0}").format(action))
 
@@ -281,8 +379,13 @@ def get_workflow_info(doc: dict | str):
     user_roles = frappe.get_roles(user)
 
     workflow_state = get_doc_workflow_state(doc)
+    if not workflow_state:
+        workflow_state = workflow.transitions[0].state
 
     state = next((s for s in workflow.states if s.state == workflow_state), None)
+
+    if state and (cint(state.doc_status) != cint(doc.get("docstatus"))):
+        return None
 
     if state:
         if state.edit_permission_type == "User":
@@ -296,9 +399,10 @@ def get_workflow_info(doc: dict | str):
                 if allowed_role in user_roles:
                     allow_edit = True
 
-    result = {"workflow": workflow.as_dict()}
+    result = {"workflow": workflow.as_dict(), "current_state": workflow_state}
     if allow_edit:
         result["allow_edit"] = allow_edit
+
     return result
 
 

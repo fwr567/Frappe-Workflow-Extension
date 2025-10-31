@@ -239,14 +239,10 @@ def get_workflow_state_count(doctype, workflow_state_field, states):
     states = frappe.parse_json(states)
 
     if workflow_state_field in frappe.get_meta(doctype).get_valid_columns():
-        result = (
-            frappe.qb.from_(frappe.qb.DocType(doctype))
-            .select(
-                frappe.qb.Field(workflow_state_field),
-                frappe.qb.functions.Count("*").as_("count"),
-            )
-            .where(frappe.qb.Field(workflow_state_field).notin(states))
-            .groupby(frappe.qb.Field(workflow_state_field))
-        ).run(as_dict=True)
-
-        return [r for r in result if r.get(workflow_state_field)]
+        result = frappe.get_all(
+            doctype,
+            fields=[workflow_state_field, "count(*) as count"],
+            filters={workflow_state_field: ["not in", states]},
+            group_by=workflow_state_field,
+        )
+        return [r for r in result if r[workflow_state_field]]
