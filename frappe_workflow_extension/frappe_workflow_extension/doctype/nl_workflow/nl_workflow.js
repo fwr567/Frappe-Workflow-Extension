@@ -217,6 +217,12 @@ frappe.ui.form.on("NL Workflow Transition", {
 			frm.trigger("render_state_table");
 		});
 	},
+
+	approver_type: function (frm, cdt, cdn) {
+		var row = locals[cdt][cdn];
+		row.allowed = "";
+		frm.refresh_field("transitions");
+	},
 });
 
 async function create_docstatus_change_warning(updated_states) {

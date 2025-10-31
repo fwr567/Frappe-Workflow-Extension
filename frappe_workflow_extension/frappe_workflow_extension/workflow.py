@@ -47,7 +47,7 @@ def get_closest_company_with_workflow(
 
 
 @frappe.whitelist()
-def get_workflow_name(doctype: str, docname: str = None) -> str | None:
+def get_workflow_name(doctype: str, docname: str | int = None) -> str | None:
     """
     Determine the most specific active workflow for a document based on:
     Priority:
@@ -134,7 +134,7 @@ def get_workflow_name(doctype: str, docname: str = None) -> str | None:
 
 
 @frappe.whitelist()
-def get_workflow(doctype: str, docname: str = None):
+def get_workflow(doctype: str, docname: str | int = None):
     """Return cached NL Workflow document for the given doctype."""
     workflow_name = get_workflow_name(doctype, docname)
     if not workflow_name:
@@ -222,6 +222,12 @@ def get_allowed_transitions_for_user(
 
     for t in transitions:
         if t.approver_type == "Role" and t.allowed in user_roles:
+            if t.company:
+                if t.get("company"):
+                    if not frappe.has_permission(
+                        "Company", doc=t.company, ptype="read", user=user
+                    ):
+                        continue
             allowed.append(t)
         elif t.approver_type == "User" and t.allowed == user:
             allowed.append(t)
@@ -520,7 +526,6 @@ def validate_workflow(doc):
                 _("Workflow State transition not allowed from {0} to {1}").format(
                     bold_current, bold_next
                 ),
-                WorkflowPermissionError,
             )
 
         transitions = get_transitions(doc._doc_before_save)
@@ -530,7 +535,6 @@ def validate_workflow(doc):
                 _("Workflow State transition not allowed from {0} to {1}").format(
                     bold_current, bold_next
                 ),
-                WorkflowPermissionError,
             )
 
 
