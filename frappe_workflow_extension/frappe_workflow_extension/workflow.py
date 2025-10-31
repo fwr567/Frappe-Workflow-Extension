@@ -193,7 +193,15 @@ def get_transitions(
         if raise_exception:
             frappe.throw(_("Workflow State not set"))
         return []
-    return get_allowed_transitions_for_user(workflow_doc.name, current_state, user)
+    transitions = get_allowed_transitions_for_user(
+        workflow_doc.name, current_state, user
+    )
+    allowed_transitions = []
+    for transition in transitions:
+        if not is_transition_condition_satisfied(transition, doc):
+            continue
+        allowed_transitions.append(transition)
+    return allowed_transitions
 
 
 def get_allowed_transitions_for_user(
@@ -205,7 +213,7 @@ def get_allowed_transitions_for_user(
     transitions = frappe.get_all(
         "NL Workflow Transition",
         filters={"parent": workflow, "state": current_state},
-        fields=["name", "approver_type", "allowed", "next_state", "action"],
+        fields=["*"],
         order_by="idx asc",
     )
 
