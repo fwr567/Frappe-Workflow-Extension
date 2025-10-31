@@ -7,10 +7,10 @@ $(document).on("form-refresh", function (event, frm) {
 			method: "frappe_workflow_extension.frappe_workflow_extension.workflow.get_workflow_info",
 			args: { doc: frm.doc },
 			callback: function (res) {
+				if (!res?.message?.workflow && !res?.message?.current_state) return;
 				const workflow = res.message.workflow;
 				const workflow_name = res.message.workflow.name;
 				const current_state = res.message.current_state;
-				if (!workflow && !current_state) return;
 
 				if (!res.message.allow_edit) {
 					frm.set_read_only(true);
