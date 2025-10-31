@@ -1,141 +1,142 @@
 {
-  "actions": [],
-  "creation": "2025-10-29 09:13:25.763158",
-  "default_view": "List",
-  "description": "Defines actions on states and the next step and allowed roles.",
-  "doctype": "DocType",
-  "engine": "InnoDB",
-  "field_order": [
-    "state",
-    "action",
-    "next_state",
-    "send_email_to_creator",
-    "column_break_eyal",
-    "approver_type",
-    "allowed",
-    "company",
-    "allow_self_approval",
-    "conditions",
-    "condition",
-    "column_break_7",
-    "example",
-    "workflow_builder_id"
-  ],
-  "fields": [
-    {
-      "fieldname": "state",
-      "fieldtype": "Link",
-      "in_list_view": 1,
-      "label": "State",
-      "options": "Workflow State",
-      "print_width": "200px",
-      "reqd": 1,
-      "width": "200px"
-    },
-    {
-      "fieldname": "action",
-      "fieldtype": "Link",
-      "in_list_view": 1,
-      "label": "Action",
-      "options": "Workflow Action Master",
-      "print_width": "200px",
-      "reqd": 1,
-      "width": "200px"
-    },
-    {
-      "fieldname": "next_state",
-      "fieldtype": "Link",
-      "in_list_view": 1,
-      "label": "Next State",
-      "options": "Workflow State",
-      "print_width": "200px",
-      "reqd": 1,
-      "width": "200px"
-    },
-    {
-      "default": "0",
-      "depends_on": "eval: doc.allow_self_approval == 1",
-      "fieldname": "send_email_to_creator",
-      "fieldtype": "Check",
-      "label": "Send Email To Creator"
-    },
-    {
-      "fieldname": "column_break_eyal",
-      "fieldtype": "Column Break"
-    },
-    {
-      "fieldname": "approver_type",
-      "fieldtype": "Link",
-      "in_filter": 1,
-      "in_list_view": 1,
-      "in_preview": 1,
-      "in_standard_filter": 1,
-      "label": "Approver Type",
-      "link_filters": "[[\"DocType\",\"name\",\"in\",[\"Role\",\"User\"]]]",
-      "options": "DocType",
-      "reqd": 1
-    },
-    {
-      "fieldname": "allowed",
-      "fieldtype": "Dynamic Link",
-      "in_list_view": 1,
-      "label": "Approver",
-      "options": "approver_type",
-      "print_width": "200px",
-      "reqd": 1,
-      "width": "200px"
-    },
-    {
-      "fieldname": "company",
-      "fieldtype": "Link",
-      "label": "Company",
-      "options": "Company"
-    },
-    {
-      "default": "1",
-      "description": "Allow approval for creator of the document",
-      "fieldname": "allow_self_approval",
-      "fieldtype": "Check",
-      "label": "Allow Self Approval"
-    },
-    {
-      "fieldname": "conditions",
-      "fieldtype": "Section Break",
-      "label": "Conditions"
-    },
-    {
-      "fieldname": "condition",
-      "fieldtype": "Code",
-      "label": "Condition",
-      "options": "Python"
-    },
-    {
-      "fieldname": "column_break_7",
-      "fieldtype": "Column Break"
-    },
-    {
-      "fieldname": "example",
-      "fieldtype": "HTML",
-      "label": "Example",
-      "options": "<pre><code>doc.grand_total &gt; 0</code></pre>\n\n<p>Conditions should be written in simple Python. Please use properties available in the form only.</p>\n<p>Allowed functions:\n</p><ul>\n<li>frappe.db.get_value</li>\n<li>frappe.db.get_list</li>\n<li>frappe.session</li>\n<li>frappe.utils.now_datetime</li>\n<li>frappe.utils.get_datetime</li>\n<li>frappe.utils.add_to_date</li>\n<li>frappe.utils.now</li>\n</ul>\n<p>Example: </p><pre><code>doc.creation &gt; frappe.utils.add_to_date(frappe.utils.now_datetime(), days=-5, as_string=True, as_datetime=True) </code></pre><p></p>"
-    },
-    {
-      "fieldname": "workflow_builder_id",
-      "fieldtype": "Data",
-      "hidden": 1,
-      "label": "Workflow Builder ID"
-    }
-  ],
-  "istable": 1,
-  "links": [],
-  "modified": "2025-10-29 11:34:08.758134",
-  "modified_by": "Administrator",
-  "module": "Frappe Workflow Extension",
-  "name": "NL Workflow Transition",
-  "owner": "Administrator",
-  "permissions": [],
-  "row_format": "Dynamic",
-  "sort_field": "modified",
-  "sort_order": "DESC",
-  "states": []
+ "actions": [],
+ "creation": "2025-10-29 09:13:25.763158",
+ "default_view": "List",
+ "description": "Defines actions on states and the next step and allowed roles.",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "state",
+  "action",
+  "next_state",
+  "send_email_to_creator",
+  "column_break_eyal",
+  "approver_type",
+  "allowed",
+  "company",
+  "allow_self_approval",
+  "conditions",
+  "condition",
+  "column_break_7",
+  "example",
+  "workflow_builder_id"
+ ],
+ "fields": [
+  {
+   "fieldname": "state",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "State",
+   "options": "Workflow State",
+   "print_width": "200px",
+   "reqd": 1,
+   "width": "200px"
+  },
+  {
+   "fieldname": "action",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Action",
+   "options": "Workflow Action Master",
+   "print_width": "200px",
+   "reqd": 1,
+   "width": "200px"
+  },
+  {
+   "fieldname": "next_state",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Next State",
+   "options": "Workflow State",
+   "print_width": "200px",
+   "reqd": 1,
+   "width": "200px"
+  },
+  {
+   "default": "0",
+   "depends_on": "eval: doc.allow_self_approval == 1",
+   "fieldname": "send_email_to_creator",
+   "fieldtype": "Check",
+   "label": "Send Email To Creator"
+  },
+  {
+   "fieldname": "column_break_eyal",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "approver_type",
+   "fieldtype": "Link",
+   "in_filter": 1,
+   "in_list_view": 1,
+   "in_preview": 1,
+   "in_standard_filter": 1,
+   "label": "Approver Type",
+   "link_filters": "[[\"DocType\",\"name\",\"in\",[\"Role\",\"User\"]]]",
+   "options": "DocType",
+   "reqd": 1
+  },
+  {
+   "fieldname": "allowed",
+   "fieldtype": "Dynamic Link",
+   "in_list_view": 1,
+   "label": "Approver",
+   "options": "approver_type",
+   "print_width": "200px",
+   "reqd": 1,
+   "width": "200px"
+  },
+  {
+   "depends_on": "eval: doc.approver_type == \"Role\"",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company"
+  },
+  {
+   "default": "1",
+   "description": "Allow approval for creator of the document",
+   "fieldname": "allow_self_approval",
+   "fieldtype": "Check",
+   "label": "Allow Self Approval"
+  },
+  {
+   "fieldname": "conditions",
+   "fieldtype": "Section Break",
+   "label": "Conditions"
+  },
+  {
+   "fieldname": "condition",
+   "fieldtype": "Code",
+   "label": "Condition",
+   "options": "Python"
+  },
+  {
+   "fieldname": "column_break_7",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "example",
+   "fieldtype": "HTML",
+   "label": "Example",
+   "options": "<pre><code>doc.grand_total &gt; 0</code></pre>\n\n<p>Conditions should be written in simple Python. Please use properties available in the form only.</p>\n<p>Allowed functions:\n</p><ul>\n<li>frappe.db.get_value</li>\n<li>frappe.db.get_list</li>\n<li>frappe.session</li>\n<li>frappe.utils.now_datetime</li>\n<li>frappe.utils.get_datetime</li>\n<li>frappe.utils.add_to_date</li>\n<li>frappe.utils.now</li>\n</ul>\n<p>Example: </p><pre><code>doc.creation &gt; frappe.utils.add_to_date(frappe.utils.now_datetime(), days=-5, as_string=True, as_datetime=True) </code></pre><p></p>"
+  },
+  {
+   "fieldname": "workflow_builder_id",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Workflow Builder ID"
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2025-10-31 10:51:12.436579",
+ "modified_by": "Administrator",
+ "module": "Frappe Workflow Extension",
+ "name": "NL Workflow Transition",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
 }
