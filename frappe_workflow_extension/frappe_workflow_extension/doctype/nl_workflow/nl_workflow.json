@@ -129,6 +129,7 @@
    "options": "Project"
   },
   {
+   "description": "Applies this workflow to documents created by the selected user.",
    "fieldname": "user",
    "fieldtype": "Link",
    "label": "User",
@@ -152,6 +153,7 @@
   },
   {
    "default": "1",
+   "description": "Allow child companies to use this workflow if they don\u2019t have their own.\n",
    "fieldname": "allow_descendants",
    "fieldtype": "Check",
    "label": "Allow Descendants"
@@ -159,7 +161,7 @@
  ],
  "icon": "fa fa-random",
  "links": [],
- "modified": "2025-10-31 07:57:57.442736",
+ "modified": "2025-11-03 14:33:07.116115",
  "modified_by": "Administrator",
  "module": "Frappe Workflow Extension",
  "name": "NL Workflow",

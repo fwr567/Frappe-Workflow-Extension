@@ -255,3 +255,10 @@ doc_events = {
 accounting_dimension_doctypes = [
     "NL Workflow",
 ]
+
+fixtures = [
+    {
+        "doctype": "Workspace",
+        "filters": [["name", "in", ["Settings"]]],
+    }
+]
